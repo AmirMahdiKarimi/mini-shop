@@ -58,7 +58,7 @@ def run(service: ShopService) -> None:
                         f"{sale.product_name} | {sale.quantity} × {sale.unit_price:,}"
                     )
                 print(f"تعداد: {report.quantity} | درآمد: {report.revenue:,} ریال")
-                export_path = input("مسیر خروجی CSV (خالی = بدون خروجی): ").strip()
+                export_path = input("مسیر خروجی Excel (خالی = بدون خروجی): ").strip()
                 if export_path:
                     export_sales(report, Path(export_path))
                     print("فایل گزارش ذخیره شد.")
@@ -81,5 +81,5 @@ def run(service: ShopService) -> None:
                 print("گزینهٔ نامعتبر.")
         except (ShopError, ValueError) as exc:
             print(f"خطا: {exc if isinstance(exc, ShopError) else 'شناسه باید عدد صحیح باشد.'}")
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             print(f"ذخیرهٔ فایل انجام نشد: {exc}")

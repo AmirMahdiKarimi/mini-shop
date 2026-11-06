@@ -12,40 +12,13 @@ MAX_AMOUNT = 10**15 - 1
 MAX_STOCK = 10**9 - 1
 
 
-def positive_int(value: str | int, label: str, *, maximum: int = MAX_STOCK) -> int:
+def parse_integer(value: str | int, label: str, *, minimum: int, maximum: int) -> int:
     raw = str(value).strip().replace(",", "").replace("٬", "")
-    if not raw or not raw.isdecimal():
-        raise ValidationError(f"{label} باید عدد صحیح مثبت باشد.")
-    if len(raw) > 20:
-        raise ValidationError(f"{label} بیش از حد مجاز است.")
-    number = int(raw)
-    if not 0 < number <= maximum:
-        raise ValidationError(f"{label} باید بین ۱ و {maximum:,} باشد.")
-    return number
-
-
-def nonnegative_amount(value: str | int, label: str) -> int:
-    raw = str(value).strip().replace(",", "").replace("٬", "")
-    if not raw or not raw.isdecimal():
-        raise ValidationError(f"{label} باید عدد صحیح غیرمنفی باشد.")
-    if len(raw) > 20:
-        raise ValidationError(f"{label} بیش از حد مجاز است.")
-    number = int(raw)
-    if number > MAX_AMOUNT:
-        raise ValidationError(f"{label} بیش از حد مجاز است.")
-    return number
-
-
-def nonnegative_stock(value: str | int) -> int:
-    raw = str(value).strip().replace(",", "").replace("٬", "")
-    if not raw or not raw.isdecimal():
-        raise ValidationError("تعداد اولیه باید عدد صحیح غیرمنفی باشد.")
-    if len(raw) > 20:
-        raise ValidationError("تعداد اولیه بیش از حد مجاز است.")
-    number = int(raw)
-    if number > MAX_STOCK:
-        raise ValidationError("تعداد اولیه بیش از حد مجاز است.")
-    return number
+    if raw and raw.isdecimal() and len(raw) <= 20:
+        number = int(raw)
+        if minimum <= number <= maximum:
+            return number
+    raise ValidationError(f"{label} باید عدد صحیح بین {minimum:,} و {maximum:,} باشد.")
 
 
 def clean_name(value: str) -> str:
@@ -74,9 +47,9 @@ class ShopService:
     ) -> Shop:
         return self.store.add_product(
             clean_name(name),
-            nonnegative_amount(purchase_price, "قیمت خرید"),
-            nonnegative_amount(sale_price, "قیمت فروش"),
-            nonnegative_stock(stock),
+            parse_integer(purchase_price, "قیمت خرید", minimum=0, maximum=MAX_AMOUNT),
+            parse_integer(sale_price, "قیمت فروش", minimum=0, maximum=MAX_AMOUNT),
+            parse_integer(stock, "تعداد اولیه", minimum=0, maximum=MAX_STOCK),
         )
 
     def list_products(self, query: str = "") -> list[Shop]:
@@ -91,15 +64,19 @@ class ShopService:
         return self.store.edit_product(
             product_id,
             clean_name(name),
-            nonnegative_amount(purchase_price, "قیمت خرید"),
-            nonnegative_amount(sale_price, "قیمت فروش"),
+            parse_integer(purchase_price, "قیمت خرید", minimum=0, maximum=MAX_AMOUNT),
+            parse_integer(sale_price, "قیمت فروش", minimum=0, maximum=MAX_AMOUNT),
         )
 
     def add_stock(self, product_id: int, quantity: str | int) -> Shop:
-        return self.store.add_stock(product_id, positive_int(quantity, "تعداد افزایش"))
+        return self.store.add_stock(
+            product_id, parse_integer(quantity, "تعداد افزایش", minimum=1, maximum=MAX_STOCK)
+        )
 
     def sell(self, product_id: int, quantity: str | int):
-        return self.store.sell(product_id, positive_int(quantity, "تعداد فروش"))
+        return self.store.sell(
+            product_id, parse_integer(quantity, "تعداد فروش", minimum=1, maximum=MAX_STOCK)
+        )
 
     def archive(self, product_id: int) -> None:
         self.store.archive(product_id)

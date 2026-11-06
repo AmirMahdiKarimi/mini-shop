@@ -1,8 +1,8 @@
-import csv
 import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from importlib.util import find_spec
 from pathlib import Path
 
 from shop.errors import ValidationError
@@ -35,7 +35,7 @@ class ShopTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 0)
 
-    def test_stock_changes_without_version_and_never_goes_negative(self):
+    def test_stock_change_never_goes_negative(self):
         product = self.service.add_product("برنج", 10, 20, 4)
         self.service.add_stock(product.id, 1)
         self.service.sell(product.id, 5)
@@ -71,51 +71,42 @@ class ShopTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.service.report("0001-01-01", "0001-01-02")
 
+    def test_numeric_boundaries(self):
+        product = self.service.add_product("آب", 0, 0, 0)
+        self.assertEqual(product.stock, 0)
+        for quantity in (0, -1, "1.5", "9" * 30):
+            with self.subTest(quantity=quantity), self.assertRaises(ValidationError):
+                self.service.add_stock(product.id, quantity)
+        with self.assertRaises(ValidationError):
+            self.service.sell(product.id, 0)
+        with self.assertRaises(ValidationError):
+            self.service.add_product("قند", 10**15, 1, 1)
+
     def test_zero_stock_archive_and_reuse_name(self):
         first = self.service.add_product("آب", 1, 2, 0)
         self.service.archive(first.id)
         second = self.service.add_product("آب", 3, 4, 2)
         self.assertNotEqual(first.id, second.id)
 
-    def test_report_csv_contains_snapshot_and_total(self):
+    @unittest.skipUnless(find_spec("openpyxl"), "openpyxl is not installed")
+    def test_report_excel_has_readable_columns_and_total(self):
+        from openpyxl import load_workbook
+
         product = self.service.add_product("کیک", 3, 7, 2)
         sale = self.service.sell(product.id, 1)
-        day = sale.sold_at.astimezone(IRAN_TIME).date().isoformat()
-        path = Path(self.temp.name) / "report.csv"
-        export_sales(self.service.report(day, day), path)
-        with path.open(encoding="utf-8-sig", newline="") as source:
-            rows = list(csv.reader(source))
-        self.assertEqual(rows[1][2:4], ["کیک", "1"])
-        self.assertEqual(rows[-1][-1], "7")
-
-    def test_existing_database_schema_remains_usable(self):
-        old_path = Path(self.temp.name) / "old.db"
-        with closing(sqlite3.connect(old_path)) as db:
-            db.executescript("""
-                CREATE TABLE products (
-                    id INTEGER PRIMARY KEY, name TEXT NOT NULL,
-                    purchase_price INTEGER NOT NULL, sale_price INTEGER NOT NULL,
-                    stock INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-                    active INTEGER NOT NULL DEFAULT 1
-                );
-                CREATE TABLE sales (
-                    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL,
-                    product_name TEXT NOT NULL, quantity INTEGER NOT NULL,
-                    unit_price INTEGER NOT NULL, unit_cost INTEGER NOT NULL,
-                    sold_at TEXT NOT NULL
-                );
-                INSERT INTO products (name, purchase_price, sale_price, stock)
-                VALUES ('قدیمی', 4, 10, 2);
-                INSERT INTO sales (product_id, product_name, quantity, unit_price, unit_cost, sold_at)
-                VALUES (1, 'قدیمی', 2, 10, 4, '2026-11-06T08:00:00.000000+00:00');
-            """)
-        old_service = ShopService(SQLiteStore(old_path))
-        old_report = old_service.report("2026-11-06", "2026-11-06")
-        self.assertTrue(any(sale.quantity == 2 and sale.revenue == 20 for sale in old_report.sales))
-        sale = old_service.sell(1, 1)
-        self.assertEqual((sale.revenue, old_service.get_product(1).stock), (10, 1))
-        with closing(sqlite3.connect(old_path)) as db:
-            self.assertEqual(db.execute("SELECT unit_cost FROM sales").fetchone()[0], 4)
+        formula_name = self.service.add_product("=1+1", 1, 1, 1)
+        second_sale = self.service.sell(formula_name.id, 1)
+        days = [item.sold_at.astimezone(IRAN_TIME).date().isoformat() for item in (sale, second_sale)]
+        path = Path(self.temp.name) / "report.xlsx"
+        export_sales(self.service.report(min(days), max(days)), path)
+        workbook = load_workbook(path)
+        sheet = workbook.active
+        self.assertEqual({sheet["C2"].value, sheet["C3"].value}, {"کیک", "=1+1"})
+        formula_cell = sheet["C2"] if sheet["C2"].value == "=1+1" else sheet["C3"]
+        self.assertEqual(formula_cell.data_type, "s")
+        self.assertEqual(sheet["F4"].value, 8)
+        self.assertEqual(sheet.column_dimensions["C"].width, 32)
+        self.assertTrue(sheet.sheet_view.rightToLeft)
 
 
 if __name__ == "__main__":

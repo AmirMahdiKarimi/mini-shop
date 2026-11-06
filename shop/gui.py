@@ -108,12 +108,13 @@ class ShopApp(tk.Tk):
             (5, "افزودن کالا", self.add_product),
             (6, "ذخیرهٔ ویرایش", self.edit_product),
             (7, "افزایش موجودی", self.add_stock),
-            (8, "بایگانی", self.archive_product),
+            (8, "حذف کالا", self.archive_product),
             (9, "پاک کردن فرم", self.clear_form),
         ):
-            ttk.Button(form, text=title, command=command).grid(
-                row=row, column=0, columnspan=2, sticky="ew", pady=3
-            )
+            button = ttk.Button(form, text=title, command=command)
+            button.grid(row=row, column=0, columnspan=2, sticky="ew", pady=3)
+            if row == 5:
+                self.add_button = button
 
     def _sales_view(self) -> None:
         tab = self.sales_tab
@@ -138,7 +139,7 @@ class ShopApp(tk.Tk):
             ttk.Label(filters, text=label).pack(side="right", padx=6)
             ttk.Entry(filters, textvariable=variable, width=14, justify="center").pack(side="right", padx=6)
         ttk.Button(filters, text="نمایش", command=self.show_report).pack(side="right", padx=6)
-        ttk.Button(filters, text="خروجی CSV", command=self.export_report).pack(side="right", padx=6)
+        ttk.Button(filters, text="خروجی Excel", command=self.export_report).pack(side="right", padx=6)
         self.summary = tk.StringVar()
         ttk.Label(tab, textvariable=self.summary, font=("Tahoma", 11, "bold")).grid(
             row=1, column=0, sticky="e", pady=12
@@ -165,10 +166,12 @@ class ShopApp(tk.Tk):
         self.price.set(str(self.selected.sale_price))
         self.initial_stock.set("")
         self.initial_entry.configure(state="disabled")
+        self.add_button.configure(state="disabled")
 
     def clear_form(self) -> None:
         self.selected = None
         self.initial_entry.configure(state="normal")
+        self.add_button.configure(state="normal")
         for variable in (self.name, self.purchase, self.price, self.initial_stock):
             variable.set("")
         self.products_tree.selection_remove(self.products_tree.selection())
@@ -275,14 +278,14 @@ class ShopApp(tk.Tk):
             messagebox.showwarning("انتخاب کالا", str(exc), parent=self)
             return
         if messagebox.askyesno(
-            "بایگانی کالا", f"«{product.name}» با موجودی {product.stock} بایگانی شود؟", parent=self
+            "حذف کالا", f"«{product.name}» با موجودی {product.stock} از فهرست حذف شود؟", parent=self
         ):
 
             def save():
                 self.service.archive(product.id)
                 self.clear_form()
 
-            self._run(save, "کالا با موفقیت بایگانی شد.")
+            self._run(save, "کالا با موفقیت حذف شد.")
 
     def show_report(self) -> None:
         try:
@@ -311,12 +314,15 @@ class ShopApp(tk.Tk):
             messagebox.showwarning("بازهٔ گزارش", str(exc), parent=self)
             return
         path = filedialog.asksaveasfilename(
-            parent=self, defaultextension=".csv", filetypes=[("CSV", "*.csv")], initialfile="sales-report.csv"
+            parent=self,
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx")],
+            initialfile="sales-report.xlsx",
         )
         if path:
             try:
                 export_sales(report, path)
-            except OSError as exc:
+            except (OSError, RuntimeError) as exc:
                 messagebox.showerror("خطا در ذخیره", str(exc), parent=self)
             else:
                 messagebox.showinfo("عملیات موفق", "گزارش ذخیره شد.", parent=self)

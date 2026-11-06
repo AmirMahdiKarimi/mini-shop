@@ -13,7 +13,6 @@ from shop.models import Sale, SalesReport, Shop
 class SQLiteStore:
     def __init__(self, path: Path):
         self.path = Path(path)
-        self._legacy_cost = False
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -54,9 +53,6 @@ class SQLiteStore:
                 );
                 CREATE INDEX IF NOT EXISTS sales_sold_at_idx ON sales(sold_at);
             """)
-            # Existing databases have a required unit_cost column. Keep their sales readable.
-            columns = db.execute("PRAGMA table_info(sales)").fetchall()
-            self._legacy_cost = any(column["name"] == "unit_cost" for column in columns)
 
     @staticmethod
     def _product(row: sqlite3.Row) -> Shop:
@@ -147,20 +143,11 @@ class SQLiteStore:
             if changed.rowcount != 1:
                 raise ValidationError("موجودی کالا برای این فروش کافی نیست.")
             sold_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-            values = (product_id, current.name, quantity, current.sale_price, sold_at)
-            if self._legacy_cost:
-                cursor = db.execute(
-                    """INSERT INTO sales
-                       (product_id, product_name, quantity, unit_price, sold_at, unit_cost)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (*values, current.purchase_price),
-                )
-            else:
-                cursor = db.execute(
-                    """INSERT INTO sales (product_id, product_name, quantity, unit_price, sold_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    values,
-                )
+            cursor = db.execute(
+                """INSERT INTO sales (product_id, product_name, quantity, unit_price, sold_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (product_id, current.name, quantity, current.sale_price, sold_at),
+            )
             return Sale(
                 cursor.lastrowid,
                 product_id,
