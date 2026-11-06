@@ -11,7 +11,3 @@ class ValidationError(ShopError):
 
 class NotFoundError(ShopError):
     """The requested active product does not exist."""
-
-
-class ConflictError(ShopError):
-    """The product has changed since it was displayed."""

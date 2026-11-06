@@ -86,24 +86,23 @@ class ShopService:
         return self.store.get_product(product_id)
 
     def edit_product(
-        self, product_id: int, version: int, name: str, purchase_price: str | int, sale_price: str | int
+        self, product_id: int, name: str, purchase_price: str | int, sale_price: str | int
     ) -> Shop:
         return self.store.edit_product(
             product_id,
-            version,
             clean_name(name),
             nonnegative_amount(purchase_price, "قیمت خرید"),
             nonnegative_amount(sale_price, "قیمت فروش"),
         )
 
-    def add_stock(self, product_id: int, version: int, quantity: str | int) -> Shop:
-        return self.store.add_stock(product_id, version, positive_int(quantity, "تعداد افزایش"))
+    def add_stock(self, product_id: int, quantity: str | int) -> Shop:
+        return self.store.add_stock(product_id, positive_int(quantity, "تعداد افزایش"))
 
-    def sell(self, product_id: int, version: int, quantity: str | int):
-        return self.store.sell(product_id, version, positive_int(quantity, "تعداد فروش"))
+    def sell(self, product_id: int, quantity: str | int):
+        return self.store.sell(product_id, positive_int(quantity, "تعداد فروش"))
 
-    def archive(self, product_id: int, version: int) -> None:
-        self.store.archive(product_id, version)
+    def archive(self, product_id: int) -> None:
+        self.store.archive(product_id)
 
     def report(self, start: str, end: str) -> SalesReport:
         first, last = parse_day(start), parse_day(end)

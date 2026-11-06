@@ -24,7 +24,6 @@ def export_sales(report: SalesReport, path: Path) -> None:
                 "تعداد",
                 "قیمت واحد (ریال)",
                 "مبلغ کل (ریال)",
-                "سود ناخالص (ریال)",
             )
         )
         for sale in report.sales:
@@ -36,7 +35,6 @@ def export_sales(report: SalesReport, path: Path) -> None:
                     sale.quantity,
                     sale.unit_price,
                     sale.revenue,
-                    sale.quantity * (sale.unit_price - sale.unit_cost),
                 )
             )
-        writer.writerow(("جمع", "", "", report.quantity, "", report.revenue, report.profit))
+        writer.writerow(("جمع", "", "", report.quantity, "", report.revenue))

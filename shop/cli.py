@@ -35,12 +35,12 @@ def run(service: ShopService) -> None:
             elif choice in ("2", "۲"):
                 product = _choose(service)
                 if product:
-                    updated = service.add_stock(product.id, product.version, input("تعداد افزایش: "))
+                    updated = service.add_stock(product.id, input("تعداد افزایش: "))
                     print(f"موجودی جدید: {updated.stock}")
             elif choice in ("3", "۳"):
                 product = _choose(service)
                 if product:
-                    sale = service.sell(product.id, product.version, input("تعداد فروش: "))
+                    sale = service.sell(product.id, input("تعداد فروش: "))
                     print(f"فروش ثبت شد. مبلغ: {sale.revenue:,} ریال")
             elif choice in ("4", "۴"):
                 for product in service.list_products(input("بخشی از نام: ")):
@@ -57,10 +57,7 @@ def run(service: ShopService) -> None:
                         f"{sale.sold_at.astimezone(IRAN_TIME):%Y-%m-%d %H:%M} | "
                         f"{sale.product_name} | {sale.quantity} × {sale.unit_price:,}"
                     )
-                print(
-                    f"تعداد: {report.quantity} | درآمد: {report.revenue:,} ریال | "
-                    f"سود ناخالص: {report.profit:,} ریال"
-                )
+                print(f"تعداد: {report.quantity} | درآمد: {report.revenue:,} ریال")
                 export_path = input("مسیر خروجی CSV (خالی = بدون خروجی): ").strip()
                 if export_path:
                     export_sales(report, Path(export_path))
@@ -70,16 +67,15 @@ def run(service: ShopService) -> None:
                 if product:
                     updated = service.edit_product(
                         product.id,
-                        product.version,
                         input(f"نام [{product.name}]: ").strip() or product.name,
                         input(f"خرید [{product.purchase_price}]: ").strip() or product.purchase_price,
                         input(f"فروش [{product.sale_price}]: ").strip() or product.sale_price,
                     )
-                    print(f"ویرایش شد؛ نسخهٔ جدید {updated.version}.")
+                    print(f"کالای {updated.name} ویرایش شد.")
             elif choice in ("7", "۷"):
                 product = _choose(service)
                 if product and input("برای بایگانی «بله» بنویسید: ").strip() == "بله":
-                    service.archive(product.id, product.version)
+                    service.archive(product.id)
                     print("بایگانی شد.")
             else:
                 print("گزینهٔ نامعتبر.")

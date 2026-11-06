@@ -1,4 +1,4 @@
-"""SQLite storage: each write is atomic and guarded by the product version."""
+"""SQLite storage for products and sales."""
 
 import sqlite3
 from collections.abc import Iterator
@@ -6,13 +6,14 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from shop.errors import ConflictError, NotFoundError, ValidationError
+from shop.errors import NotFoundError, ValidationError
 from shop.models import Sale, SalesReport, Shop
 
 
 class SQLiteStore:
     def __init__(self, path: Path):
         self.path = Path(path)
+        self._legacy_cost = False
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -39,7 +40,6 @@ class SQLiteStore:
                     purchase_price INTEGER NOT NULL CHECK (purchase_price BETWEEN 0 AND 999999999999999),
                     sale_price INTEGER NOT NULL CHECK (sale_price BETWEEN 0 AND 999999999999999),
                     stock INTEGER NOT NULL CHECK (stock BETWEEN 0 AND 999999999),
-                    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
                     active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS active_product_name_idx
@@ -50,11 +50,13 @@ class SQLiteStore:
                     product_name TEXT NOT NULL,
                     quantity INTEGER NOT NULL CHECK (quantity > 0),
                     unit_price INTEGER NOT NULL CHECK (unit_price >= 0),
-                    unit_cost INTEGER NOT NULL CHECK (unit_cost >= 0),
                     sold_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS sales_sold_at_idx ON sales(sold_at);
             """)
+            # Existing databases have a required unit_cost column. Keep their sales readable.
+            columns = db.execute("PRAGMA table_info(sales)").fetchall()
+            self._legacy_cost = any(column["name"] == "unit_cost" for column in columns)
 
     @staticmethod
     def _product(row: sqlite3.Row) -> Shop:
@@ -64,7 +66,6 @@ class SQLiteStore:
             row["purchase_price"],
             row["sale_price"],
             row["stock"],
-            row["version"],
             bool(row["active"]),
         )
 
@@ -76,7 +77,6 @@ class SQLiteStore:
             row["product_name"],
             row["quantity"],
             row["unit_price"],
-            row["unit_cost"],
             datetime.fromisoformat(row["sold_at"]),
         )
 
@@ -85,11 +85,6 @@ class SQLiteStore:
         if row is None:
             raise NotFoundError("کالای فعال پیدا نشد.")
         return self._product(row)
-
-    @staticmethod
-    def _check_version(product: Shop, version: int) -> None:
-        if product.version != version:
-            raise ConflictError("اطلاعات کالا تغییر کرده است؛ فهرست را تازه کنید.")
 
     def add_product(self, name: str, purchase_price: int, sale_price: int, stock: int) -> Shop:
         with self._connection() as db:
@@ -113,81 +108,76 @@ class SQLiteStore:
         with self._connection() as db:
             return self._current(db, product_id)
 
-    def edit_product(
-        self, product_id: int, version: int, name: str, purchase_price: int, sale_price: int
-    ) -> Shop:
+    def edit_product(self, product_id: int, name: str, purchase_price: int, sale_price: int) -> Shop:
         with self._connection() as db:
-            current = self._current(db, product_id)
-            self._check_version(current, version)
             try:
                 changed = db.execute(
-                    """UPDATE products SET name=?, purchase_price=?, sale_price=?, version=version+1
-                              WHERE id=? AND version=? AND active=1""",
-                    (name, purchase_price, sale_price, product_id, version),
+                    """UPDATE products SET name=?, purchase_price=?, sale_price=?
+                       WHERE id=? AND active=1""",
+                    (name, purchase_price, sale_price, product_id),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValidationError("نام کالا تکراری است.") from exc
             if changed.rowcount != 1:
-                raise ConflictError("اطلاعات کالا تغییر کرده است؛ فهرست را تازه کنید.")
+                raise NotFoundError("کالای فعال پیدا نشد.")
             return self._current(db, product_id)
 
-    def add_stock(self, product_id: int, version: int, quantity: int) -> Shop:
+    def add_stock(self, product_id: int, quantity: int) -> Shop:
         with self._connection() as db:
-            current = self._current(db, product_id)
-            self._check_version(current, version)
-            current.add_stock(quantity)
             try:
                 changed = db.execute(
-                    """UPDATE products SET stock=stock+?, version=version+1
-                              WHERE id=? AND version=? AND active=1""",
-                    (quantity, product_id, version),
+                    "UPDATE products SET stock=stock+? WHERE id=? AND active=1",
+                    (quantity, product_id),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValidationError("موجودی از حد مجاز بیشتر می‌شود.") from exc
             if changed.rowcount != 1:
-                raise ConflictError("موجودی تغییر کرده است؛ دوباره بررسی کنید.")
+                raise NotFoundError("کالای فعال پیدا نشد.")
             return self._current(db, product_id)
 
-    def sell(self, product_id: int, version: int, quantity: int) -> Sale:
+    def sell(self, product_id: int, quantity: int) -> Sale:
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             current = self._current(db, product_id)
-            self._check_version(current, version)
             current.remove_stock(quantity)
             changed = db.execute(
-                """UPDATE products SET stock=stock-?, version=version+1
-                                   WHERE id=? AND version=? AND active=1 AND stock>=?""",
-                (quantity, product_id, version, quantity),
+                "UPDATE products SET stock=stock-? WHERE id=? AND active=1 AND stock>=?",
+                (quantity, product_id, quantity),
             )
             if changed.rowcount != 1:
-                raise ConflictError("موجودی تغییر کرده است؛ دوباره بررسی کنید.")
+                raise ValidationError("موجودی کالا برای این فروش کافی نیست.")
             sold_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-            cursor = db.execute(
-                """INSERT INTO sales
-                (product_id, product_name, quantity, unit_price, unit_cost, sold_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (product_id, current.name, quantity, current.sale_price, current.purchase_price, sold_at),
-            )
+            values = (product_id, current.name, quantity, current.sale_price, sold_at)
+            if self._legacy_cost:
+                cursor = db.execute(
+                    """INSERT INTO sales
+                       (product_id, product_name, quantity, unit_price, sold_at, unit_cost)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (*values, current.purchase_price),
+                )
+            else:
+                cursor = db.execute(
+                    """INSERT INTO sales (product_id, product_name, quantity, unit_price, sold_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    values,
+                )
             return Sale(
                 cursor.lastrowid,
                 product_id,
                 current.name,
                 quantity,
                 current.sale_price,
-                current.purchase_price,
                 datetime.fromisoformat(sold_at),
             )
 
-    def archive(self, product_id: int, version: int) -> None:
+    def archive(self, product_id: int) -> None:
         with self._connection() as db:
-            current = self._current(db, product_id)
-            self._check_version(current, version)
             changed = db.execute(
-                "UPDATE products SET active=0, version=version+1 WHERE id=? AND version=?",
-                (product_id, version),
+                "UPDATE products SET active=0 WHERE id=? AND active=1",
+                (product_id,),
             )
             if changed.rowcount != 1:
-                raise ConflictError("اطلاعات کالا تغییر کرده است؛ فهرست را تازه کنید.")
+                raise NotFoundError("کالای فعال پیدا نشد.")
 
     def report(self, begin: datetime, finish: datetime) -> SalesReport:
         with self._connection() as db:
@@ -200,6 +190,5 @@ class SQLiteStore:
             return SalesReport(
                 sum(s.quantity for s in sales),
                 sum(s.revenue for s in sales),
-                sum(s.quantity * s.unit_cost for s in sales),
                 sales,
             )

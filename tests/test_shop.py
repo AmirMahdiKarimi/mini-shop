@@ -5,7 +5,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from shop.errors import ConflictError, ValidationError
+from shop.errors import ValidationError
 from shop.export import export_sales
 from shop.service import IRAN_TIME, ShopService
 from shop.storage import SQLiteStore
@@ -20,35 +20,33 @@ class ShopTests(unittest.TestCase):
 
     def test_sale_updates_stock_and_preserves_price_snapshot(self):
         product = self.service.add_product("شیر", 50, 80, 5)
-        sale = self.service.sell(product.id, product.version, 2)
+        sale = self.service.sell(product.id, 2)
         self.assertEqual(self.service.get_product(product.id).stock, 3)
-        updated = self.service.get_product(product.id)
-        self.service.edit_product(product.id, updated.version, "شیر", 60, 100)
+        self.service.edit_product(product.id, "شیر", 60, 100)
         day = sale.sold_at.astimezone(IRAN_TIME).date().isoformat()
         report = self.service.report(day, day)
-        self.assertEqual((report.quantity, report.revenue, report.profit), (2, 160, 60))
+        self.assertEqual((report.quantity, report.revenue), (2, 160))
 
     def test_insufficient_stock_has_no_partial_sale(self):
         product = self.service.add_product("چای", 10, 20, 1)
         with self.assertRaises(ValidationError):
-            self.service.sell(product.id, product.version, 2)
+            self.service.sell(product.id, 2)
         self.assertEqual(self.service.get_product(product.id).stock, 1)
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 0)
 
-    def test_stale_version_cannot_overwrite_or_sell(self):
+    def test_stock_changes_without_version_and_never_goes_negative(self):
         product = self.service.add_product("برنج", 10, 20, 4)
-        self.service.add_stock(product.id, product.version, 1)
-        with self.assertRaises(ConflictError):
-            self.service.sell(product.id, product.version, 1)
-        with self.assertRaises(ConflictError):
-            self.service.edit_product(product.id, product.version, "برنج", 10, 30)
-        self.assertEqual(self.service.get_product(product.id).stock, 5)
+        self.service.add_stock(product.id, 1)
+        self.service.sell(product.id, 5)
+        with self.assertRaises(ValidationError):
+            self.service.sell(product.id, 1)
+        self.assertEqual(self.service.get_product(product.id).stock, 0)
 
     def test_archive_allows_remaining_stock_and_preserves_sales(self):
         product = self.service.add_product("نان", 5, 10, 3)
-        sale = self.service.sell(product.id, product.version, 1)
-        self.service.archive(product.id, self.service.get_product(product.id).version)
+        sale = self.service.sell(product.id, 1)
+        self.service.archive(product.id)
         self.assertEqual(self.service.list_products(), [])
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(
@@ -75,20 +73,49 @@ class ShopTests(unittest.TestCase):
 
     def test_zero_stock_archive_and_reuse_name(self):
         first = self.service.add_product("آب", 1, 2, 0)
-        self.service.archive(first.id, first.version)
+        self.service.archive(first.id)
         second = self.service.add_product("آب", 3, 4, 2)
         self.assertNotEqual(first.id, second.id)
 
     def test_report_csv_contains_snapshot_and_total(self):
         product = self.service.add_product("کیک", 3, 7, 2)
-        sale = self.service.sell(product.id, product.version, 1)
+        sale = self.service.sell(product.id, 1)
         day = sale.sold_at.astimezone(IRAN_TIME).date().isoformat()
         path = Path(self.temp.name) / "report.csv"
         export_sales(self.service.report(day, day), path)
         with path.open(encoding="utf-8-sig", newline="") as source:
             rows = list(csv.reader(source))
         self.assertEqual(rows[1][2:4], ["کیک", "1"])
-        self.assertEqual(rows[-1][-2:], ["7", "4"])
+        self.assertEqual(rows[-1][-1], "7")
+
+    def test_existing_database_schema_remains_usable(self):
+        old_path = Path(self.temp.name) / "old.db"
+        with closing(sqlite3.connect(old_path)) as db:
+            db.executescript("""
+                CREATE TABLE products (
+                    id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+                    purchase_price INTEGER NOT NULL, sale_price INTEGER NOT NULL,
+                    stock INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+                    active INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE TABLE sales (
+                    id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL,
+                    product_name TEXT NOT NULL, quantity INTEGER NOT NULL,
+                    unit_price INTEGER NOT NULL, unit_cost INTEGER NOT NULL,
+                    sold_at TEXT NOT NULL
+                );
+                INSERT INTO products (name, purchase_price, sale_price, stock)
+                VALUES ('قدیمی', 4, 10, 2);
+                INSERT INTO sales (product_id, product_name, quantity, unit_price, unit_cost, sold_at)
+                VALUES (1, 'قدیمی', 2, 10, 4, '2026-11-06T08:00:00.000000+00:00');
+            """)
+        old_service = ShopService(SQLiteStore(old_path))
+        old_report = old_service.report("2026-11-06", "2026-11-06")
+        self.assertTrue(any(sale.quantity == 2 and sale.revenue == 20 for sale in old_report.sales))
+        sale = old_service.sell(1, 1)
+        self.assertEqual((sale.revenue, old_service.get_product(1).stock), (10, 1))
+        with closing(sqlite3.connect(old_path)) as db:
+            self.assertEqual(db.execute("SELECT unit_cost FROM sales").fetchone()[0], 4)
 
 
 if __name__ == "__main__":

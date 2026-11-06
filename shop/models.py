@@ -8,14 +8,13 @@ from shop.errors import ValidationError
 
 @dataclass(frozen=True, slots=True)
 class Shop:
-    """A product in the shop, with a version for optimistic concurrency."""
+    """A product in the shop."""
 
     id: int
     name: str
     purchase_price: int
     sale_price: int
     stock: int
-    version: int
     active: bool = True
 
     def add_stock(self, quantity: int) -> "Shop":
@@ -42,7 +41,6 @@ class Sale:
     product_name: str
     quantity: int
     unit_price: int
-    unit_cost: int
     sold_at: datetime
 
     @property
@@ -54,9 +52,4 @@ class Sale:
 class SalesReport:
     quantity: int
     revenue: int
-    cost: int
     sales: tuple[Sale, ...]
-
-    @property
-    def profit(self) -> int:
-        return self.revenue - self.cost

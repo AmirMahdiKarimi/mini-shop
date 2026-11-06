@@ -11,3 +11,6 @@ __pycache__/
 
 # Reference documents not distributed with the application
 *.pdf
+
+tmp_dev/
+tmp/
