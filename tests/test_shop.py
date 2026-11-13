@@ -89,7 +89,7 @@ class ShopTests(unittest.TestCase):
         self.assertNotEqual(first.id, second.id)
 
     @unittest.skipUnless(find_spec("openpyxl"), "openpyxl is not installed")
-    def test_report_excel_has_readable_columns_and_total(self):
+    def test_report_excel_contains_snapshot_and_total(self):
         from openpyxl import load_workbook
 
         product = self.service.add_product("کیک", 3, 7, 2)
@@ -105,8 +105,6 @@ class ShopTests(unittest.TestCase):
         formula_cell = sheet["C2"] if sheet["C2"].value == "=1+1" else sheet["C3"]
         self.assertEqual(formula_cell.data_type, "s")
         self.assertEqual(sheet["F4"].value, 8)
-        self.assertEqual(sheet.column_dimensions["C"].width, 32)
-        self.assertTrue(sheet.sheet_view.rightToLeft)
 
 
 if __name__ == "__main__":

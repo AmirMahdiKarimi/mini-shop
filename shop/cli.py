@@ -52,11 +52,6 @@ def run(service: ShopService) -> None:
                 start = input(f"از تاریخ YYYY-MM-DD [{today}]: ").strip() or today
                 end = input(f"تا تاریخ YYYY-MM-DD [{today}]: ").strip() or today
                 report = service.report(start, end)
-                for sale in report.sales:
-                    print(
-                        f"{sale.sold_at.astimezone(IRAN_TIME):%Y-%m-%d %H:%M} | "
-                        f"{sale.product_name} | {sale.quantity} × {sale.unit_price:,}"
-                    )
                 print(f"تعداد: {report.quantity} | درآمد: {report.revenue:,} ریال")
                 export_path = input("مسیر خروجی Excel (خالی = بدون خروجی): ").strip()
                 if export_path:

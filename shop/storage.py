@@ -19,7 +19,6 @@ class SQLiteStore:
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
         try:
             yield connection
             connection.commit()
@@ -30,7 +29,6 @@ class SQLiteStore:
             connection.close()
 
     def initialize(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS products (
@@ -62,7 +60,6 @@ class SQLiteStore:
             row["purchase_price"],
             row["sale_price"],
             row["stock"],
-            bool(row["active"]),
         )
 
     @staticmethod

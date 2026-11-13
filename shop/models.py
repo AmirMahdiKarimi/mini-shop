@@ -15,7 +15,6 @@ class Shop:
     purchase_price: int
     sale_price: int
     stock: int
-    active: bool = True
 
     def add_stock(self, quantity: int) -> "Shop":
         if quantity <= 0:
