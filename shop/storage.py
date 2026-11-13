@@ -1,7 +1,4 @@
-"""SQLite storage for products and sales."""
-
 import sqlite3
-from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,11 +8,11 @@ from shop.models import Sale, SalesReport, Shop
 
 
 class SQLiteStore:
-    def __init__(self, path: Path):
+    def __init__(self, path):
         self.path = Path(path)
 
     @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
+    def _connection(self):
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
@@ -28,7 +25,7 @@ class SQLiteStore:
         finally:
             connection.close()
 
-    def initialize(self) -> None:
+    def initialize(self):
         with self._connection() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS products (
@@ -53,7 +50,7 @@ class SQLiteStore:
             """)
 
     @staticmethod
-    def _product(row: sqlite3.Row) -> Shop:
+    def _product(row):
         return Shop(
             row["id"],
             row["name"],
@@ -63,7 +60,7 @@ class SQLiteStore:
         )
 
     @staticmethod
-    def _sale(row: sqlite3.Row) -> Sale:
+    def _sale(row):
         return Sale(
             row["id"],
             row["product_id"],
@@ -73,13 +70,13 @@ class SQLiteStore:
             datetime.fromisoformat(row["sold_at"]),
         )
 
-    def _current(self, db: sqlite3.Connection, product_id: int) -> Shop:
+    def _current(self, db, product_id):
         row = db.execute("SELECT * FROM products WHERE id = ? AND active = 1", (product_id,)).fetchone()
         if row is None:
             raise NotFoundError("کالای فعال پیدا نشد.")
         return self._product(row)
 
-    def add_product(self, name: str, purchase_price: int, sale_price: int, stock: int) -> Shop:
+    def add_product(self, name, purchase_price, sale_price, stock):
         with self._connection() as db:
             try:
                 cursor = db.execute(
@@ -90,18 +87,17 @@ class SQLiteStore:
                 raise ValidationError("کالای فعالی با این نام وجود دارد.") from exc
             return self._current(db, cursor.lastrowid)
 
-    def list_products(self, query: str = "") -> list[Shop]:
+    def list_products(self, query=""):
         with self._connection() as db:
-            # Search in Python so %, _ and backslashes are literal characters.
             rows = db.execute("SELECT * FROM products WHERE active = 1 ORDER BY id DESC").fetchall()
             products = [self._product(row) for row in rows]
             return [p for p in products if query.casefold() in p.name.casefold()]
 
-    def get_product(self, product_id: int) -> Shop:
+    def get_product(self, product_id):
         with self._connection() as db:
             return self._current(db, product_id)
 
-    def edit_product(self, product_id: int, name: str, purchase_price: int, sale_price: int) -> Shop:
+    def edit_product(self, product_id, name, purchase_price, sale_price):
         with self._connection() as db:
             try:
                 changed = db.execute(
@@ -115,7 +111,7 @@ class SQLiteStore:
                 raise NotFoundError("کالای فعال پیدا نشد.")
             return self._current(db, product_id)
 
-    def add_stock(self, product_id: int, quantity: int) -> Shop:
+    def add_stock(self, product_id, quantity):
         with self._connection() as db:
             try:
                 changed = db.execute(
@@ -128,7 +124,7 @@ class SQLiteStore:
                 raise NotFoundError("کالای فعال پیدا نشد.")
             return self._current(db, product_id)
 
-    def sell(self, product_id: int, quantity: int) -> Sale:
+    def sell(self, product_id, quantity):
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             current = self._current(db, product_id)
@@ -154,7 +150,7 @@ class SQLiteStore:
                 datetime.fromisoformat(sold_at),
             )
 
-    def archive(self, product_id: int) -> None:
+    def archive(self, product_id):
         with self._connection() as db:
             changed = db.execute(
                 "UPDATE products SET active=0 WHERE id=? AND active=1",
@@ -163,7 +159,7 @@ class SQLiteStore:
             if changed.rowcount != 1:
                 raise NotFoundError("کالای فعال پیدا نشد.")
 
-    def report(self, begin: datetime, finish: datetime) -> SalesReport:
+    def report(self, begin, finish):
         with self._connection() as db:
             rows = db.execute(
                 """SELECT * FROM sales WHERE sold_at >= ? AND sold_at < ?

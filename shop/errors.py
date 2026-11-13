@@ -1,13 +1,10 @@
-"""Errors safe to show in either user interface."""
-
-
 class ShopError(Exception):
-    """A requested shop operation cannot be completed."""
+    pass
 
 
 class ValidationError(ShopError):
-    """Input does not satisfy a business rule."""
+    pass
 
 
 class NotFoundError(ShopError):
-    """The requested active product does not exist."""
+    pass

@@ -1,16 +1,14 @@
-"""Simple Tkinter interface for products, sales, and reports."""
-
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from shop.errors import ShopError
 from shop.export import export_sales
-from shop.service import IRAN_TIME, ShopService
+from shop.service import IRAN_TIME
 
 
 class ShopApp(tk.Tk):
-    def __init__(self, service: ShopService):
+    def __init__(self, service):
         super().__init__()
         self.service = service
         self.sale_products = []
@@ -247,5 +245,5 @@ class ShopApp(tk.Tk):
                 messagebox.showinfo("عملیات موفق", "گزارش ذخیره شد.", parent=self)
 
 
-def run(service: ShopService) -> None:
+def run(service):
     ShopApp(service).mainloop()

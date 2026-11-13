@@ -1,14 +1,12 @@
-"""Interactive text interface using the same service as the GUI."""
-
 from datetime import datetime
 from pathlib import Path
 
 from shop.errors import ShopError
 from shop.export import export_sales
-from shop.service import IRAN_TIME, ShopService
+from shop.service import IRAN_TIME
 
 
-def _choose(service: ShopService):
+def _choose(service):
     products = service.list_products()
     if not products:
         print("هنوز کالایی ثبت نشده است.")
@@ -19,7 +17,7 @@ def _choose(service: ShopService):
     return service.get_product(product_id)
 
 
-def run(service: ShopService) -> None:
+def run(service):
     menu = "\n۱ افزودن | ۲ موجودی | ۳ فروش | ۴ جست‌وجو | ۵ گزارش | ۶ ویرایش | ۷ بایگانی | ۰ خروج"
     while True:
         print(menu)

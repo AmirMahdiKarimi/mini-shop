@@ -1,12 +1,9 @@
-"""Excel sales report shared by both interfaces."""
-
 from pathlib import Path
 
-from shop.models import SalesReport
 from shop.service import IRAN_TIME
 
 
-def export_sales(report: SalesReport, path: Path) -> None:
+def export_sales(report, path):
     try:
         from openpyxl import Workbook
     except ModuleNotFoundError as exc:
@@ -36,7 +33,6 @@ def export_sales(report: SalesReport, path: Path) -> None:
                 sale.revenue,
             )
         )
-        # Product names that begin with "=" must stay text, not Excel formulas.
         sheet.cell(sheet.max_row, 3).data_type = "s"
     sheet.append(("جمع", "", "", report.quantity, "", report.revenue))
     workbook.save(Path(path))

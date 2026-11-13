@@ -1,5 +1,3 @@
-"""Entry point for the graphical and text interfaces."""
-
 import argparse
 import sys
 
@@ -9,8 +7,7 @@ from shop.service import ShopService
 from shop.storage import SQLiteStore
 
 
-def main() -> None:
-    # Windows shells can default to cp1252, which cannot print Persian CLI text.
+def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
