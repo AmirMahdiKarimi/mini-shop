@@ -3,8 +3,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from shop.errors import NotFoundError, ValidationError
-from shop.models import Sale, SalesReport, Shop
+from shop.errors import NotFoundError, NotFoundUserError, ValidationError, ValidationUserError
+from shop.models import Product, Sale, SalesReport, User, UserRole
 
 
 class SQLiteStore:
@@ -28,6 +28,15 @@ class SQLiteStore:
     def initialize(self):
         with self._connection() as db:
             db.executescript("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL COLLATE NOCASE,
+                    username TEXT NOT NULL COLLATE NOCASE,
+                    password TEXT NOT NULL,
+                    role TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS user_username_idx
+                    ON users(username);
                 CREATE TABLE IF NOT EXISTS products (
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL COLLATE NOCASE,
@@ -40,6 +49,8 @@ class SQLiteStore:
                     ON products(name) WHERE active = 1;
                 CREATE TABLE IF NOT EXISTS sales (
                     id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    user_username TEXT NOT NULL,
                     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
                     product_name TEXT NOT NULL,
                     quantity INTEGER NOT NULL CHECK (quantity > 0),
@@ -50,19 +61,32 @@ class SQLiteStore:
             """)
 
     @staticmethod
+    def _user(row):
+        return User(
+            row["id"],
+            row["name"],
+            row["username"],
+            row["password"],
+            UserRole(row["role"]),
+        )
+
+    @staticmethod
     def _product(row):
-        return Shop(
+        return Product(
             row["id"],
             row["name"],
             row["purchase_price"],
             row["sale_price"],
             row["stock"],
+            bool(row["active"]),
         )
 
     @staticmethod
     def _sale(row):
         return Sale(
             row["id"],
+            row["user_id"],
+            row["user_username"],
             row["product_id"],
             row["product_name"],
             row["quantity"],
@@ -70,10 +94,40 @@ class SQLiteStore:
             datetime.fromisoformat(row["sold_at"]),
         )
 
+    def get_user_by_username(self, username):
+        with self._connection() as db:
+            user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+            if user:
+                return self._user(user)
+            raise NotFoundUserError("کاربر یافت نشد")
+
+    def add_user(self, name, username, password, role):
+        with self._connection() as db:
+            try:
+                cursor = db.execute(
+                    "INSERT INTO users (name, username, password, role) VALUES (?, ?, ?, ?)",
+                    (name, username, password, role.value),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValidationUserError("این یوزرنیم از قبل وجود دارد") from exc
+            return self._current_user(db, cursor.lastrowid)
+
+    def list_users(self, query=""):
+        with self._connection() as db:
+            rows = db.execute("SELECT * FROM users ORDER BY id DESC").fetchall()
+            users = [self._user(row) for row in rows]
+            return [u for u in users if query.casefold() in u.username.casefold()]
+
+    def _current_user(self, db, user_id):
+        row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            raise NotFoundError("کاربر پیدا نشد")
+        return self._user(row)
+
     def _current(self, db, product_id):
         row = db.execute("SELECT * FROM products WHERE id = ? AND active = 1", (product_id,)).fetchone()
         if row is None:
-            raise NotFoundError("کالای فعال پیدا نشد.")
+            raise NotFoundError("کالای فعال پیدا نشد")
         return self._product(row)
 
     def add_product(self, name, purchase_price, sale_price, stock):
@@ -84,7 +138,7 @@ class SQLiteStore:
                     (name, purchase_price, sale_price, stock),
                 )
             except sqlite3.IntegrityError as exc:
-                raise ValidationError("کالای فعالی با این نام وجود دارد.") from exc
+                raise ValidationError("کالای فعالی با این نام وجود دارد") from exc
             return self._current(db, cursor.lastrowid)
 
     def list_products(self, query=""):
@@ -106,9 +160,9 @@ class SQLiteStore:
                     (name, purchase_price, sale_price, product_id),
                 )
             except sqlite3.IntegrityError as exc:
-                raise ValidationError("نام کالا تکراری است.") from exc
+                raise ValidationError("نام کالا تکراری است") from exc
             if changed.rowcount != 1:
-                raise NotFoundError("کالای فعال پیدا نشد.")
+                raise NotFoundError("کالای فعال پیدا نشد")
             return self._current(db, product_id)
 
     def add_stock(self, product_id, quantity):
@@ -119,30 +173,42 @@ class SQLiteStore:
                     (quantity, product_id),
                 )
             except sqlite3.IntegrityError as exc:
-                raise ValidationError("موجودی از حد مجاز بیشتر می‌شود.") from exc
+                raise ValidationError("موجودی از حد مجاز بیشتر می‌شود") from exc
             if changed.rowcount != 1:
-                raise NotFoundError("کالای فعال پیدا نشد.")
+                raise NotFoundError("کالای فعال پیدا نشد")
             return self._current(db, product_id)
 
-    def sell(self, product_id, quantity):
+    def sell(self, user_id, product_id, quantity):
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
             current = self._current(db, product_id)
+            current_user = self._current_user(db, user_id)
             current.remove_stock(quantity)
             changed = db.execute(
                 "UPDATE products SET stock=stock-? WHERE id=? AND active=1 AND stock>=?",
                 (quantity, product_id, quantity),
             )
             if changed.rowcount != 1:
-                raise ValidationError("موجودی کالا برای این فروش کافی نیست.")
+                raise ValidationError("موجودی کالا برای این فروش کافی نیست")
             sold_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
             cursor = db.execute(
-                """INSERT INTO sales (product_id, product_name, quantity, unit_price, sold_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (product_id, current.name, quantity, current.sale_price, sold_at),
+                """INSERT INTO sales
+                   (user_id, user_username, product_id, product_name, quantity, unit_price, sold_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    user_id,
+                    current_user.username,
+                    product_id,
+                    current.name,
+                    quantity,
+                    current.sale_price,
+                    sold_at,
+                ),
             )
             return Sale(
                 cursor.lastrowid,
+                user_id,
+                current_user.username,
                 product_id,
                 current.name,
                 quantity,
@@ -157,7 +223,7 @@ class SQLiteStore:
                 (product_id,),
             )
             if changed.rowcount != 1:
-                raise NotFoundError("کالای فعال پیدا نشد.")
+                raise NotFoundError("کالای فعال پیدا نشد")
 
     def report(self, begin, finish):
         with self._connection() as db:

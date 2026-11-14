@@ -2,17 +2,53 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from shop.errors import ShopError
+from shop.errors import AuthenticationUserError, ShopError
 from shop.export import export_sales
-from shop.service import IRAN_TIME
+from shop.models import UserRole
+from shop.utils import IRAN_TIME
 
 
 class ShopApp(tk.Tk):
     def __init__(self, service):
         super().__init__()
         self.service = service
+        self.user = None
         self.sale_products = []
+        self.title("ورود به فروشگاه")
+        self.geometry("420x320")
+        self.resizable(False, False)
+        self.username = tk.StringVar()
+        self.password = tk.StringVar()
+        self.login_error = tk.StringVar()
+        self.login_frame = ttk.Frame(self, padding=28)
+        self.login_frame.pack(fill="both", expand=True)
+        ttk.Label(self.login_frame, text="ورود به فروشگاه", font=("Tahoma", 17, "bold")).pack(pady=(8, 24))
+        ttk.Label(self.login_frame, text="نام کاربری").pack(anchor="e")
+        username_entry = ttk.Entry(self.login_frame, textvariable=self.username, justify="right")
+        username_entry.pack(fill="x", pady=(4, 14))
+        ttk.Label(self.login_frame, text="رمز عبور").pack(anchor="e")
+        password_entry = ttk.Entry(self.login_frame, textvariable=self.password, show="*", justify="right")
+        password_entry.pack(fill="x", pady=(4, 16))
+        password_entry.bind("<Return>", lambda _event: self._login())
+        ttk.Button(self.login_frame, text="ورود", command=self._login).pack(fill="x")
+        ttk.Label(self.login_frame, textvariable=self.login_error, foreground="#b42318").pack(pady=12)
+        username_entry.focus_set()
+
+    def _login(self):
+        try:
+            user = self.service.login(self.username.get().strip(), self.password.get())
+        except AuthenticationUserError as exc:
+            self.password.set("")
+            self.login_error.set(str(exc))
+            return
+        self.user = user
+        self.password.set("")
+        self.login_frame.destroy()
+        self._build_main()
+
+    def _build_main(self):
         self.title("فروشگاه من")
+        self.resizable(True, True)
         self.geometry("1000x650")
         self.minsize(900, 660)
         style = ttk.Style(self)
@@ -33,15 +69,14 @@ class ShopApp(tk.Tk):
         self.products_tab = ttk.Frame(tabs, padding=12)
         self.sales_tab = ttk.Frame(tabs, padding=12)
         self.report_tab = ttk.Frame(tabs, padding=12)
-        for tab, title in (
-            (self.products_tab, "کالاها"),
-            (self.sales_tab, "ثبت فروش"),
-            (self.report_tab, "گزارش فروش"),
-        ):
-            tabs.add(tab, text=title)
-        self._products_view()
+        if self.user.role in (UserRole.SELLER, UserRole.ADMIN):
+            tabs.add(self.products_tab, text="کالاها")
+            self._products_view()
+        tabs.add(self.sales_tab, text="ثبت خرید")
         self._sales_view()
-        self._report_view()
+        if self.user.role == UserRole.ADMIN:
+            tabs.add(self.report_tab, text="گزارش فروش")
+            self._report_view()
         self.refresh()
 
     def _products_view(self):
@@ -76,9 +111,9 @@ class ShopApp(tk.Tk):
         self.sale_choice = ttk.Combobox(tab, state="readonly", justify="right")
         self.sale_choice.pack(fill="x", pady=8)
         self.sale_quantity = tk.StringVar()
-        ttk.Label(tab, text="تعداد فروش").pack(anchor="e")
+        ttk.Label(tab, text="تعداد خرید").pack(anchor="e")
         ttk.Entry(tab, textvariable=self.sale_quantity, justify="right").pack(fill="x", pady=8)
-        ttk.Button(tab, text="ثبت فروش", command=self.sell).pack(anchor="e")
+        ttk.Button(tab, text="ثبت خرید", command=self.sell).pack(anchor="e")
 
     def _report_view(self):
         tab = self.report_tab
@@ -108,7 +143,7 @@ class ShopApp(tk.Tk):
     def _selected_product(self):
         selection = self.products_tree.selection()
         if not selection:
-            messagebox.showwarning("انتخاب کالا", "ابتدا کالا را از فهرست انتخاب کنید.", parent=self)
+            messagebox.showwarning("انتخاب کالا", "ابتدا کالا را از فهرست انتخاب کنید", parent=self)
             return None
         return self.service.get_product(int(selection[0]))
 
@@ -144,14 +179,16 @@ class ShopApp(tk.Tk):
             )
 
     def refresh(self):
-        self.refresh_products()
+        if self.user.role in (UserRole.SELLER, UserRole.ADMIN):
+            self.refresh_products()
         self.sale_products = self.service.list_products()
         self.sale_choice["values"] = [
             f"{p.name} | موجودی {p.stock} | {p.sale_price:,} ریال" for p in self.sale_products
         ]
         self.sale_choice.set("")
         self.sale_quantity.set("")
-        self.show_report()
+        if self.user.role == UserRole.ADMIN:
+            self.show_report()
 
     def _run(self, action, success):
         try:
@@ -165,7 +202,7 @@ class ShopApp(tk.Tk):
     def add_product(self):
         values = self._ask_product()
         if values is not None:
-            self._run(lambda: self.service.add_product(*values), "کالا با موفقیت اضافه شد.")
+            self._run(lambda: self.service.add_product(*values), "کالا با موفقیت اضافه شد")
 
     def edit_product(self):
         product = self._selected_product()
@@ -173,7 +210,7 @@ class ShopApp(tk.Tk):
             values = self._ask_product(product)
             if values is not None:
                 self._run(
-                    lambda: self.service.edit_product(product.id, *values), "مشخصات کالا با موفقیت به‌روز شد."
+                    lambda: self.service.edit_product(product.id, *values), "مشخصات کالا با موفقیت به‌روز شد"
                 )
 
     def add_stock(self):
@@ -184,17 +221,17 @@ class ShopApp(tk.Tk):
             )
             if quantity is not None:
                 self._run(
-                    lambda: self.service.add_stock(product.id, quantity), "موجودی با موفقیت افزایش یافت."
+                    lambda: self.service.add_stock(product.id, quantity), "موجودی با موفقیت افزایش یافت"
                 )
 
     def sell(self):
         index = self.sale_choice.current()
         if index < 0:
-            messagebox.showwarning("انتخاب کالا", "ابتدا کالای موردنظر را انتخاب کنید.", parent=self)
+            messagebox.showwarning("انتخاب کالا", "ابتدا کالای موردنظر را انتخاب کنید", parent=self)
             return
         self._run(
-            lambda: self.service.sell(self.sale_products[index].id, self.sale_quantity.get()),
-            "فروش با موفقیت ثبت شد.",
+            lambda: self.service.sell(self.user.id, self.sale_products[index].id, self.sale_quantity.get()),
+            "خرید با موفقیت ثبت شد",
         )
 
     def archive_product(self):
@@ -202,7 +239,7 @@ class ShopApp(tk.Tk):
         if product and messagebox.askyesno(
             "حذف کالا", f"«{product.name}» با موجودی {product.stock} از فهرست حذف شود؟", parent=self
         ):
-            self._run(lambda: self.service.archive(product.id), "کالا با موفقیت حذف شد.")
+            self._run(lambda: self.service.archive(product.id), "کالا با موفقیت حذف شد")
 
     def show_report(self):
         self.summary.set("")
@@ -242,7 +279,7 @@ class ShopApp(tk.Tk):
             except (OSError, RuntimeError) as exc:
                 messagebox.showerror("خطا در ذخیره", str(exc), parent=self)
             else:
-                messagebox.showinfo("عملیات موفق", "گزارش ذخیره شد.", parent=self)
+                messagebox.showinfo("عملیات موفق", "گزارش ذخیره شد", parent=self)
 
 
 def run(service):

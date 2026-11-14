@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from shop.service import IRAN_TIME
+from shop.utils import IRAN_TIME
 
 
 def export_sales(report, path):
     try:
         from openpyxl import Workbook
     except ModuleNotFoundError as exc:
-        raise RuntimeError("برای خروجی Excel، ابتدا openpyxl را نصب کنید.") from exc
+        raise RuntimeError("برای خروجی Excel، ابتدا openpyxl را نصب کنید") from exc
 
     workbook = Workbook()
     sheet = workbook.active

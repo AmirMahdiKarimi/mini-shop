@@ -1,15 +1,16 @@
 from datetime import datetime
+from getpass import getpass
 from pathlib import Path
 
-from shop.errors import ShopError
+from shop.errors import ShopError, UserError
 from shop.export import export_sales
-from shop.service import IRAN_TIME
+from shop.utils import IRAN_TIME
 
 
 def _choose(service):
     products = service.list_products()
     if not products:
-        print("هنوز کالایی ثبت نشده است.")
+        print("هنوز کالایی ثبت نشده است")
         return None
     for product in products:
         print(f"{product.id}: {product.name} | موجودی {product.stock} | فروش {product.sale_price:,} ریال")
@@ -18,6 +19,11 @@ def _choose(service):
 
 
 def run(service):
+    try:
+        user = service.login(input("نام کاربری: ").strip(), getpass("رمز عبور: "))
+    except UserError as exc:
+        print(f"خطا: {exc}")
+        return
     menu = "\n۱ افزودن | ۲ موجودی | ۳ فروش | ۴ جست‌وجو | ۵ گزارش | ۶ ویرایش | ۷ بایگانی | ۰ خروج"
     while True:
         print(menu)
@@ -29,7 +35,7 @@ def run(service):
                 product = service.add_product(
                     input("نام: "), input("قیمت خرید (ریال): "), input("قیمت فروش (ریال): "), input("تعداد: ")
                 )
-                print(f"کالا با شناسهٔ {product.id} ثبت شد.")
+                print(f"کالا با شناسهٔ {product.id} ثبت شد")
             elif choice in ("2", "۲"):
                 product = _choose(service)
                 if product:
@@ -38,7 +44,7 @@ def run(service):
             elif choice in ("3", "۳"):
                 product = _choose(service)
                 if product:
-                    sale = service.sell(product.id, input("تعداد فروش: "))
+                    sale = service.sell(user.id, product.id, input("تعداد فروش: "))
                     print(f"فروش ثبت شد. مبلغ: {sale.revenue:,} ریال")
             elif choice in ("4", "۴"):
                 for product in service.list_products(input("بخشی از نام: ")):
@@ -54,7 +60,7 @@ def run(service):
                 export_path = input("مسیر خروجی Excel (خالی = بدون خروجی): ").strip()
                 if export_path:
                     export_sales(report, Path(export_path))
-                    print("فایل گزارش ذخیره شد.")
+                    print("فایل گزارش ذخیره شد")
             elif choice in ("6", "۶"):
                 product = _choose(service)
                 if product:
@@ -64,15 +70,15 @@ def run(service):
                         input(f"خرید [{product.purchase_price}]: ").strip() or product.purchase_price,
                         input(f"فروش [{product.sale_price}]: ").strip() or product.sale_price,
                     )
-                    print(f"کالای {updated.name} ویرایش شد.")
+                    print(f"کالای {updated.name} ویرایش شد")
             elif choice in ("7", "۷"):
                 product = _choose(service)
                 if product and input("برای بایگانی «بله» بنویسید: ").strip() == "بله":
                     service.archive(product.id)
-                    print("بایگانی شد.")
+                    print("بایگانی شد")
             else:
-                print("گزینهٔ نامعتبر.")
+                print("گزینهٔ نامعتبر")
         except (ShopError, ValueError) as exc:
-            print(f"خطا: {exc if isinstance(exc, ShopError) else 'شناسه باید عدد صحیح باشد.'}")
+            print(f"خطا: {exc if isinstance(exc, ShopError) else 'شناسه باید عدد صحیح باشد'}")
         except (OSError, RuntimeError) as exc:
             print(f"ذخیرهٔ فایل انجام نشد: {exc}")

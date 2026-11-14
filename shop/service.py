@@ -1,42 +1,42 @@
-import re
 from datetime import date, datetime, time, timedelta, timezone
 
-from shop.errors import ValidationError
-
-IRAN_TIME = timezone(timedelta(hours=3, minutes=30))
-MAX_AMOUNT = 10**15 - 1
-MAX_STOCK = 10**9 - 1
-
-
-def parse_integer(value, label, *, minimum, maximum):
-    raw = str(value).strip().replace(",", "").replace("٬", "")
-    if raw and raw.isdecimal() and len(raw) <= 20:
-        number = int(raw)
-        if minimum <= number <= maximum:
-            return number
-    raise ValidationError(f"{label} باید عدد صحیح بین {minimum:,} و {maximum:,} باشد.")
-
-
-def clean_name(value):
-    name = " ".join(value.split())
-    if not name or len(name) > 100:
-        raise ValidationError("نام کالا باید بین ۱ تا ۱۰۰ نویسه باشد.")
-    return name
-
-
-def parse_day(value):
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-        raise ValidationError("تاریخ را به شکل YYYY-MM-DD وارد کنید.")
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise ValidationError("تاریخ واردشده معتبر نیست.") from exc
+from shop.errors import AuthenticationUserError, NotFoundUserError, ValidationError
+from shop.utils import (
+    IRAN_TIME,
+    MAX_AMOUNT,
+    MAX_STOCK,
+    clean_name,
+    hash_password,
+    parse_day,
+    parse_integer,
+    validated_role,
+)
 
 
 class ShopService:
     def __init__(self, store):
         self.store = store
         self.store.initialize()
+
+    def add_user(self, name, username, password, role):
+        return self.store.add_user(
+            clean_name(name),
+            username,
+            hash_password(password),
+            validated_role(role),
+        )
+
+    def get_user_by_username(self, username):
+        return self.store.get_user_by_username(username)
+
+    def login(self, username, password):
+        try:
+            user = self.get_user_by_username(username)
+            if user and user.check_password(password):
+                return user
+        except NotFoundUserError:
+            pass
+        raise AuthenticationUserError("اطلاعات کاربری صحیح نمی باشد")
 
     def add_product(self, name, purchase_price, sale_price, stock):
         return self.store.add_product(
@@ -65,9 +65,9 @@ class ShopService:
             product_id, parse_integer(quantity, "تعداد افزایش", minimum=1, maximum=MAX_STOCK)
         )
 
-    def sell(self, product_id, quantity):
+    def sell(self, user_id, product_id, quantity):
         return self.store.sell(
-            product_id, parse_integer(quantity, "تعداد فروش", minimum=1, maximum=MAX_STOCK)
+            user_id, product_id, parse_integer(quantity, "تعداد فروش", minimum=1, maximum=MAX_STOCK)
         )
 
     def archive(self, product_id):
@@ -76,11 +76,11 @@ class ShopService:
     def report(self, start, end):
         first, last = parse_day(start), parse_day(end)
         if first > last:
-            raise ValidationError("تاریخ شروع نباید بعد از پایان باشد.")
+            raise ValidationError("تاریخ شروع نباید بعد از پایان باشد")
         if first == date.min:
-            raise ValidationError("تاریخ شروع خارج از بازهٔ پشتیبانی است.")
+            raise ValidationError("تاریخ شروع خارج از بازهٔ پشتیبانی است")
         if last == date.max:
-            raise ValidationError("تاریخ پایان خارج از بازهٔ پشتیبانی است.")
+            raise ValidationError("تاریخ پایان خارج از بازهٔ پشتیبانی است")
         begin = datetime.combine(first, time.min, IRAN_TIME).astimezone(timezone.utc)
         finish = datetime.combine(last + timedelta(days=1), time.min, IRAN_TIME).astimezone(timezone.utc)
         return self.store.report(begin, finish)
